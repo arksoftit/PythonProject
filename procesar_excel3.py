@@ -153,16 +153,19 @@ def ajustar_formato_empresa(df_local):
     else:
         print("La columna 'Empresa' no existe en el archivo.")
     return df_local
+
 def calcular_fecha_vencimiento(fecha_creacion, fecha_renovada=None):
     """
-    Calcula la fecha de vencimiento sumando 365 días a la fecha de creación.
+    Calcula la fecha de vencimiento basándose en la fecha de creación.
+    Si 'FechaRonavada' está vacío, el cálculo se realiza normalmente.
+    Si 'FechaRonavada' tiene una fecha válida, el cálculo se ajusta al año actual o al próximo.
     Args:
         fecha_creacion (str): Fecha de creación en formato "DD/MM/YYYY" o "YYYY-MM-DD".
         fecha_renovada (str, optional): Fecha de renovación en formato "DD/MM/YYYY" o "YYYY-MM-DD". Defaults to None.
     Returns:
         str: Fecha de vencimiento en formato "YYYY-MM-DD".
     """
-    # Intentar parsear la fecha en varios formatos posibles
+    # Intentar parsear la fecha de creación en varios formatos posibles
     try:
         fecha_creacion_dt = datetime.strptime(fecha_creacion, "%d/%m/%Y")
     except ValueError:
@@ -173,50 +176,54 @@ def calcular_fecha_vencimiento(fecha_creacion, fecha_renovada=None):
                 f"Formato de fecha inválido: {fecha_creacion}."
                 f"Se esperaba 'DD/MM/YYYY' o 'YYYY-MM-DD'."
             ) from exc
-    
-    # Calcular la fecha de vencimiento sumando 365 días a la fecha de creación
-    fecha_vencimiento = fecha_creacion_dt + timedelta(days=365)
-    
-    # Si la fecha de vencimiento ya pasó y hay una fecha de renovación, sumar otro año completo
-    if fecha_renovada:
+
+    # Obtener la fecha actual
+    hoy = datetime.now()
+
+    # Crear la fecha de vencimiento inicial (basada en la fecha de creación)
+    fecha_vencimiento = datetime(hoy.year, fecha_creacion_dt.month, fecha_creacion_dt.day)
+
+    # Si 'FechaRonavada' tiene una fecha válida, ajustar el cálculo al año actual o al próximo
+    if fecha_renovada and not pd.isnull(fecha_renovada):  # Verificar que no sea NaT
         try:
-            fecha_renovada_dt = datetime.strptime(fecha_renovada, "%d/%m/%Y")
-        except ValueError:
-            try:
-                fecha_renovada_dt = datetime.strptime(fecha_renovada, "%Y-%m-%d")
-            except ValueError as exc:
-                raise ValueError(
-                    f"Formato de fecha inválido: {fecha_renovada}."
-                    f"Se esperaba 'DD/MM/YYYY' o 'YYYY-MM-DD'."
-                ) from exc
-        
-        # Si la fecha de vencimiento ya pasó, sumar otro año completo
-        hoy = datetime.now()
+            # Convertir Timestamp a str si es necesario
+            if isinstance(fecha_renovada, pd.Timestamp):
+                fecha_renovada = fecha_renovada.strftime("%Y-%m-%d")
+            # Ignoramos el día y mes de 'FechaRonavada', solo usamos el año
+            fecha_vencimiento = datetime(hoy.year, fecha_creacion_dt.month, fecha_creacion_dt.day)
+            if fecha_vencimiento < hoy:
+                fecha_vencimiento = datetime(hoy.year + 1, fecha_creacion_dt.month, fecha_creacion_dt.day)
+        except Exception:
+            # Si hay algún error, usar la fecha de vencimiento inicial
+            pass
+
+    # Si no hay 'FechaRonavada', ajustar la fecha de vencimiento al año actual o al próximo
+    else:
         if fecha_vencimiento < hoy:
-            fecha_vencimiento += timedelta(days=365)
-    
+            fecha_vencimiento = datetime(hoy.year + 1, fecha_creacion_dt.month, fecha_creacion_dt.day)
+
     return fecha_vencimiento.strftime("%Y-%m-%d")
+
 def calcular_vencimiento(df_local):
     """
-    Calcula la fecha de vencimiento para todos los registros basándose en las columnas 'Creacion' y 'FechaRenovada'.
-    Las fechas de vencimiento se actualizan al año en curso o al próximo año, dependiendo de las condiciones.
-    
+    Calcula la fecha de vencimiento para todos los registros basándose en las columnas 'Creacion' y 'FechaRonavada'.
+    Si 'FechaRonavada' está vacío, el cálculo se realiza normalmente.
+    Si 'FechaRonavada' tiene una fecha válida, el cálculo se ajusta al año actual o al próximo.
     Args:
         df_local (pd.DataFrame): DataFrame a procesar.
-    
     Returns:
         pd.DataFrame: DataFrame con las fechas de vencimiento actualizadas.
     """
     print("Calculando fechas de vencimiento para todos los registros...")
     
-    # Verificar que las columnas 'Creacion' y 'FechaRenovada' existan
+    # Verificar que las columnas 'Creacion' y 'FechaRonavada' existan
     if "Creacion" not in df_local.columns:
         print("La columna 'Creacion' no existe en el archivo. No se pueden calcular las fechas de vencimiento.")
         return df_local
     
-    # Aplicar la función 'calcular_fecha_vencimiento' usando 'Creacion' y 'FechaRenovada'
+    # Aplicar la función 'calcular_fecha_vencimiento' usando 'Creacion' y 'FechaRonavada'
     df_local["Vencimiento"] = df_local.apply(
-        lambda row: calcular_fecha_vencimiento(row["Creacion"], row.get("FechaRenovada", None)),
+        lambda row: calcular_fecha_vencimiento(row["Creacion"], row.get("FechaRonavada", None)),
         axis=1
     )
     
@@ -227,10 +234,8 @@ def actualizar_status_licencia(df_local):
     """
     Actualiza la columna 'StatusLicencia' basándose en la diferencia entre 
     la fecha actual y la fecha de vencimiento.
-    
     Args:
         df_local (pd.DataFrame): DataFrame a actualizar.
-    
     Returns:
         pd.DataFrame: DataFrame con la columna 'StatusLicencia' actualizada.
     """
